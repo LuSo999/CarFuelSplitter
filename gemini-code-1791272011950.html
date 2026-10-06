@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Férové rozdělení nákladů na cestu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { background-color: #121212; color: #e5e7eb; font-family: sans-serif; }
+        .card { background-color: #1c1c1e; border: 1px solid #2d2d30; border-radius: 0.75rem; }
+        .input-dark { background-color: #121212; border: 1px solid #333; color: white; }
+        .input-dark:focus { border-color: #3b82f6; outline: none; }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen flex justify-center">
+    <div id="root" class="w-full max-w-4xl"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        function App() {
+            // Nastavena realističtější výchozí cena benzínu (46.5 Kč)
+            const [fuelPrice, setFuelPrice] = useState(46.5);
+            const [isLoadingPrice, setIsLoadingPrice] = useState(true);
+            const [avgConsumption, setAvgConsumption] = useState(6.5);
+            
+            const [passengers, setPassengers] = useState(['Řidič', 'Cestující A', 'Cestující B']);
+            const [newPassenger, setNewPassenger] = useState('');
+            
+            const [segments, setSegments] = useState([
+                { id: 1, name: 'Úsek 1', distance: 50, activePassengers: ['Řidič', 'Cestující A'] },
+                { id: 2, name: 'Úsek 2', distance: 100, activePassengers: ['Řidič', 'Cestující A', 'Cestující B'] },
+                { id: 3, name: 'Úsek 3', distance: 50, activePassengers: ['Řidič', 'Cestující B'] }
+            ]);
+
+            const colors = ['bg-blue-400', 'bg-indigo-300', 'bg-green-400', 'bg-yellow-400', 'bg-red-400', 'bg-purple-400'];
+
+            useEffect(() => {
+                window.zpracujCenuPaliva = (data) => {
+                    try {
+                        const cena = data?.kurzy?.czk?.cena; 
+                        if (cena && cena > 0) {
+                            setFuelPrice(cena);
+                        }
+                    } catch (e) {
+                        console.error("Chyba při zpracování ceny z API, použita výchozí hodnota.");
+                    } finally {
+                        setIsLoadingPrice(false);
+                    }
+                };
+
+                const script = document.createElement('script');
+                script.src = 'https://data.kurzy.cz/json/komodity/id[benzin-cz]mena[czk]cb[zpracujCenuPaliva].js';
+                script.async = true;
+                script.onerror = () => {
+                    console.warn("Nepodařilo se načíst data z API (možná blokováno prohlížečem). Použita výchozí cena.");
+                    setIsLoadingPrice(false);
+                };
+                document.body.appendChild(script);
+
+                return () => {
+                    if (document.body.contains(script)) {
+                        document.body.removeChild(script);
+                    }
+                    delete window.zpracujCenuPaliva;
+                };
+            }, []);
+
+            const addPassenger = () => {
+                if (newPassenger.trim() && !passengers.includes(newPassenger.trim())) {
+                    setPassengers([...passengers, newPassenger.trim()]);
+                    setNewPassenger('');
+                }
+            };
+
+            const removePassenger = (name) => {
+                setPassengers(passengers.filter(p => p !== name));
+                setSegments(segments.map(s => ({
+                    ...s,
+                    activePassengers: s.activePassengers.filter(p => p !== name)
+                })));
+            };
+
+            const addSegment = () => {
+                const newId = segments.length ? Math.max(...segments.map(s => s.id)) + 1 : 1;
+                setSegments([...segments, { 
+                    id: newId, 
+                    name: `Úsek ${newId}`, 
+                    distance: 0, 
+                    activePassengers: [...passengers] 
+                }]);
+            };
+
+            const removeSegment = (id) => {
+                setSegments(segments.filter(s => s.id !== id));
+            };
+
+            const updateSegmentDist = (id, dist) => {
+                setSegments(segments.map(s => s.id === id ? { ...s, distance: Number(dist) } : s));
+            };
+
+            const togglePassenger = (segmentId, passName) => {
+                setSegments(segments.map(s => {
+                    if (s.id !== segmentId) return s;
+                    const isActive = s.activePassengers.includes(passName);
+                    return {
+                        ...s,
+                        activePassengers: isActive 
+                            ? s.activePassengers.filter(p => p !== passName)
+                            : [...s.activePassengers, passName]
+                    };
+                }));
+            };
+
+            const totalDistance = segments.reduce((sum, s) => sum + (Number(s.distance) || 0), 0);
+            const totalCost = (totalDistance / 100) * avgConsumption * fuelPrice;
+
+            const results = {};
+            passengers.forEach(p => results[p] = 0);
+
+            segments.forEach(seg => {
+                if (seg.activePassengers.length > 0) {
+                    const segmentCost = ((Number(seg.distance) || 0) / 100) * avgConsumption * fuelPrice;
+                    const costPerPerson = segmentCost / seg.activePassengers.length;
+                    
+                    seg.activePassengers.forEach(p => {
+                        if (results[p] !== undefined) {
+                            results[p] += costPerPerson;
+                        }
+                    });
+                }
+            });
+
+            return (
+                <div className="space-y-6">
+                    <div className="card p-6">
+                        <h1 className="text-2xl font-semibold mb-1">Férové rozdělení nákladů na cestu</h1>
+                        <p className="text-gray-400 text-sm">Výpočet podílů pasažérů podle jednotlivých úseků trasy</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="card p-6">
+                            <h2 className="text-lg font-semibold mb-4">Náklady a spotřeba</h2>
+                            <div className="mb-4">
+                                <label className="block text-sm text-gray-400 mb-1">Celkové náklady</label>
+                                <div className="flex items-center">
+                                    <input type="text" value={Math.round(totalCost)} disabled className="input-dark rounded-l p-2 w-full cursor-not-allowed opacity-70" />
+                                    <span className="bg-[#2d2d30] border border-[#333] border-l-0 rounded-r p-2 px-4 text-gray-400">Kč</span>
+                                </div>
+                            </div>
+                            <div className="flex gap-4">
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">
+                                        Cena paliva {isLoadingPrice && <span className="text-blue-400 text-xs ml-1">(Načítám...)</span>}
+                                    </label>
+                                    <div className="flex">
+                                        <input type="number" step="0.1" value={fuelPrice} onChange={(e) => setFuelPrice(Number(e.target.value))} className="input-dark rounded-l p-2 w-full" />
+                                        <span className="bg-[#2d2d30] border border-[#333] border-l-0 rounded-r p-2 text-sm text-gray-400">Kč/l</span>
+                                    </div>
+                                </div>
+                                <div className="flex-1">
+                                    <label className="block text-sm text-gray-400 mb-1">Průměrná spotřeba</label>
+                                    <div className="flex">
+                                        <input type="number" step="0.1" value={avgConsumption} onChange={(e) => setAvgConsumption(Number(e.target.value))} className="input-dark rounded-l p-2 w-full" />
+                                        <span className="bg-[#2d2d30] border border-[#333] border-l-0 rounded-r p-2 text-sm text-gray-400">l/100 km</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="card p-6">
+                            <h2 className="text-lg font-semibold mb-4">Seznam cestujících</h2>
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                {passengers.map(p => (
+                                    <div key={p} className="flex items-center gap-2 bg-[#121212] border border-gray-700 rounded-full px-3 py-1 text-sm">
+                                        {p}
+                                        <button onClick={() => removePassenger(p)} className="text-gray-500 hover:text-white">&times;</button>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    value={newPassenger} 
+                                    onChange={(e) => setNewPassenger(e.target.value)} 
+                                    onKeyPress={(e) => e.key === 'Enter' && addPassenger()}
+                                    placeholder="Jméno cestujícího" 
+                                    className="input-dark rounded p-2 flex-1"
+                                />
+                                <button onClick={addPassenger} className="bg-[#2d2d30] hover:bg-gray-700 border border-gray-600 rounded px-4 py-2 text-sm transition">Přidat</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="card p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-lg font-semibold">Úseky cesty</h2>
+                            <button onClick={addSegment} className="bg-[#2d2d30] hover:bg-gray-700 border border-gray-600 rounded-full px-4 py-1.5 text-sm transition">+ Přidat úsek</button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            {segments.map((seg, idx) => (
+                                <div key={seg.id} className="bg-[#121212] border border-gray-800 rounded-lg p-4">
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="text-gray-300 font-medium">Úsek <br/> {idx + 1}</div>
+                                        <div className="flex items-center gap-2">
+                                            <input 
+                                                type="number" 
+                                                value={seg.distance} 
+                                                onChange={(e) => updateSegmentDist(seg.id, e.target.value)}
+                                                className="input-dark rounded p-1.5 w-20 text-right"
+                                            />
+                                            <span className="text-gray-400 text-sm">km</span>
+                                            <button onClick={() => removeSegment(seg.id)} className="text-gray-500 hover:text-white ml-2">&times;</button>
+                                        </div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-3">
+                                        {passengers.map(p => (
+                                            <label key={p} className="flex items-center gap-2 bg-[#1c1c1e] border border-gray-800 rounded px-3 py-1.5 cursor-pointer hover:border-gray-600 transition text-sm">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={seg.activePassengers.includes(p)}
+                                                    onChange={() => togglePassenger(seg.id, p)}
+                                                    className="w-4 h-4 accent-blue-500"
+                                                />
+                                                {p}
+                                            </label>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div className="card p-6">
+                        <div className="flex justify-between items-center mb-6">
+                            <h2 className="text-lg font-semibold">Konečný rozpočet</h2>
+                            <div className="text-blue-400 font-bold tracking-wider">{totalDistance} km</div>
+                        </div>
+                        
+                        <div className="space-y-6">
+                            {passengers.map((p, i) => {
+                                const cost = results[p] || 0;
+                                const percentage = totalCost > 0 ? ((cost / totalCost) * 100).toFixed(1) : 0;
+                                const barColor = colors[i % colors.length];
+
+                                return (
+                                    <div key={p}>
+                                        <div className="flex justify-between text-sm mb-1">
+                                            <span>{p}</span>
+                                            <div>
+                                                <span className="font-bold mr-2">{Math.round(cost)} Kč</span>
+                                                <span className="text-gray-500">({percentage}%)</span>
+                                            </div>
+                                        </div>
+                                        <div className="w-full bg-[#121212] h-2 rounded-full overflow-hidden">
+                                            <div className={`${barColor} h-2 rounded-full`} style={{ width: `${percentage}%` }}></div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
