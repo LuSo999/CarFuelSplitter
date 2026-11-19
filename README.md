@@ -1,3 +1,3 @@
 # CarFuelSplitter
-Simple wibe code that splits trip expenses 
+Simple vibe code that splits trip expenses 
 
